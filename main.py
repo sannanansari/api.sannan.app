@@ -4,10 +4,14 @@ from fastapi import HTTPException
 from pydantic import BaseModel
 from typing import List
 from groq import Groq
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI();
 
-client = Groq(api_key="api_key")
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 class ChatRequest(BaseModel):
     question: str
