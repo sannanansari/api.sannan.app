@@ -10,7 +10,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = FastAPI();
-
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:4200",
+        "https://ai.sannan.app",
+    ],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 class ChatRequest(BaseModel):
