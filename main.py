@@ -16,6 +16,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:4200",
         "https://ai.sannan.app",
+        "https://ai-chat.asannan822.workers.dev/",
+        "https://ai-chat.sannan.app"
     ],
     allow_methods=["*"],
     allow_headers=["*"],
