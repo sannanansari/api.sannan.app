@@ -7,6 +7,7 @@ from groq import Groq
 import os
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
+import instructor
 
 load_dotenv()
 
@@ -22,7 +23,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+client = instructor.from_groq(
+    Groq(api_key=os.getenv("GROQ_API_KEY")),
+    mode=instructor.Mode.JSON,
+)
 
 class ChatRequest(BaseModel):
     question: str
@@ -34,6 +38,28 @@ class Tea(BaseModel):
     id: int
     name: str
     origin: str
+    
+class TeaDetails(BaseModel):
+    name: str
+    origin: str
+    flavour_profile: str
+    caffeine_level:str
+    best_served: str
+    fun_fact: str
+    
+class TeaClassify(BaseModel):
+    name: str
+    classifies_type: str
+    origin_region: str
+    season: str
+    
+class TeaSentimentAnalysis(BaseModel):
+    sentiment: str
+    rating: str
+    key_notes: str
+    
+class TeaSentimentRequest(BaseModel):
+    review: str
 
 allTea: List[Tea] = [];
 
@@ -75,6 +101,61 @@ def chat_stream(req: ChatRequest):
                 yield delta
     return StreamingResponse(generate(),media_type="text/plain")
 
+@app.get("/tea-structured/{tea_name}")
+def getTeaInStructure(tea_name: str):
+    result = client.chat.completions.create(
+        model="llama-3.1-8b-instant",
+                messages=[
+            {
+                "role": "system",
+                "content": "You are a tea expert. Return structured details about teas. Be accurate and concise."
+            },
+            {
+                "role": "user",
+                "content": f"Give me details about {tea_name} tea."
+            }
+        ],
+        response_model=TeaDetails
+    )
+    return result;
+
+@app.get("/tea_classifies/{tea_name}")
+def getTeaClassifies(tea_name: str):
+    result = client.chat.completions.create(
+        model="llama-3.1-8b-instant",
+        messages= [
+            {"role": "system","content": "You are a tea expert. Return structured details about teas. Be accurate and concise."},
+            {"role": "user", "content": f"give me details about {tea_name} tea"}
+        ],
+        response_model=TeaClassify
+    )
+    return result;
+
+@app.post("/teaextractor")
+def getTeaDetailsFromText(teaText: TeaSentimentRequest):
+    result = client.chat.completions.create(
+        model='llama-3.1-8b-instant',
+        messages = [
+        {"role": "system","content": "You are a best tea review. Return structured details about tea details in text. Be accurate and concise."},
+        {"role": "user", "content": f"review: {teaText.review}"}
+        ],
+        response_model=TeaDetails
+
+    )
+    
+    return result;
+
+@app.post('/getReviewSentiments')
+def getTeaSentiment(sentiment:TeaSentimentRequest):
+    result = client.chat.completions.create(
+        model='llama-3.1-8b-instant',
+        messages = [
+        {"role": "system","content": "You are a sentiment anaylsis review. Return structured details about review. Be accurate and concise."},
+        {"role": "user", "content": f"review: {sentiment.review}"}
+        ],
+        response_model=TeaSentimentAnalysis
+    )
+    return result;
 
 @app.get("/getAllTea")
 def getAllTea():
