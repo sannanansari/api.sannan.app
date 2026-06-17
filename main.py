@@ -23,6 +23,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+raw_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 client = instructor.from_groq(
     Groq(api_key=os.getenv("GROQ_API_KEY")),
     mode=instructor.Mode.JSON,
@@ -69,7 +71,7 @@ def home():
 
 @app.post("/chat")
 def chat(req: ChatRequest) -> ChatResponse:
-    stream = client.chat.completions.create(
+    stream = raw_client.chat.completions.create(
         model="llama-3.1-8b-instant",
         messages=[
             {       
@@ -80,14 +82,13 @@ def chat(req: ChatRequest) -> ChatResponse:
                 "role": "user",
                 "content": req.question
             }
-            
-            ]    )
+            ] )
     return ChatResponse(answer=stream.choices[0].message.content)
     
 @app.post("/chat/stream")
 def chat_stream(req: ChatRequest):
     def generate():
-        stream = client.chat.completions.create(
+        stream = raw_client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[
             {"role": "system", "content": "You are a concise technical assistant."},
