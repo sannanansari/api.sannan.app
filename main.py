@@ -1,17 +1,26 @@
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from fastapi import HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List
 from groq import Groq
 import os
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
 import instructor
+from langfuse import observe, Langfuse
+# from langfuse.langchain import CallbackHandler
+from contextlib import asynccontextmanager
+from enum import Enum
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+
+app = FastAPI(title="Sanan AI API", version="1.0.0", lifespan=lifespan)
 
 load_dotenv()
 
-app = FastAPI();
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -29,6 +38,13 @@ client = instructor.from_groq(
     Groq(api_key=os.getenv("GROQ_API_KEY")),
     mode=instructor.Mode.JSON,
 )
+
+langfuse = Langfuse(
+    public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
+    secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
+    host=os.getenv("LANGFUSE_HOST"),
+)
+
 
 class ChatRequest(BaseModel):
     question: str
@@ -49,16 +65,26 @@ class TeaDetails(BaseModel):
     best_served: str
     fun_fact: str
     
+class TeaType(str, Enum):
+    green = "Green Tea"
+    black = "Black Tea"
+    white = "White Tea"
+    oolong = "Oolong Tea"
+    herbal = "Herbal Tea"
+    puerh = "Pu-erh Tea"
+    yellow = "Yellow Tea"
+
 class TeaClassify(BaseModel):
     name: str
-    classifies_type: str
+    classifies_type: TeaType
     origin_region: str
     season: str
+
     
 class TeaSentimentAnalysis(BaseModel):
-    sentiment: str
-    rating: str
-    key_notes: str
+    sentiment: str = Field(description="exactly: positive, negative, or neutral")
+    rating: str = Field(description="numeric score like '4 out of 5'")
+    key_notes: str = Field(description="comma separated descriptors")
     
 class TeaSentimentRequest(BaseModel):
     review: str
@@ -70,8 +96,16 @@ def home():
     return {"status" : "ok"};
 
 @app.post("/chat")
+@observe(name="chat")
 def chat(req: ChatRequest) -> ChatResponse:
-    stream = raw_client.chat.completions.create(
+    # trace = langfuse.trace(name="chat")
+    # generation = trace.generation(
+    #     name="groq-chat",
+    #     model="llama-3.1-8b-instant",
+    #     input=req.question,
+    # )
+
+    response = raw_client.chat.completions.create(
         model="llama-3.1-8b-instant",
         messages=[
             {       
@@ -83,9 +117,21 @@ def chat(req: ChatRequest) -> ChatResponse:
                 "content": req.question
             }
             ] )
-    return ChatResponse(answer=stream.choices[0].message.content)
+    answer = response.choices[0].message.content
+
+
+    # generation.end(
+    #     output=answer,
+    #     usage={
+    #         "input": response.usage.prompt_tokens,
+    #         "output": response.usage.completion_tokens,
+    #     }
+    # )
+
+    return ChatResponse(answer=answer)
     
 @app.post("/chat/stream")
+@observe(name="chat-stream")
 def chat_stream(req: ChatRequest):
     def generate():
         stream = raw_client.chat.completions.create(
@@ -103,24 +149,32 @@ def chat_stream(req: ChatRequest):
     return StreamingResponse(generate(),media_type="text/plain")
 
 @app.get("/tea-structured/{tea_name}")
-def getTeaInStructure(tea_name: str):
+@observe(name="tea-structured")
+def get_tea_structured(tea_name: str):
+    # trace = langfuse.trace(name="tea-structured")
+    # generation = trace.generation(
+    #     name="groq-tea-details",
+    #     model="llama-3.1-8b-instant",
+    #     input=tea_name,
+    # )
+
     result = client.chat.completions.create(
         model="llama-3.1-8b-instant",
-                messages=[
+        messages=[
             {
                 "role": "system",
                 "content": "You are a tea expert. Return structured details about teas. Be accurate and concise."
             },
-            {
-                "role": "user",
-                "content": f"Give me details about {tea_name} tea."
-            }
+            {"role": "user", "content": f"Give me details about {tea_name} tea."}
         ],
-        response_model=TeaDetails
+        response_model=TeaDetails,
     )
-    return result;
+
+    # generation.end(output=result.model_dump())
+    return result
 
 @app.get("/tea_classifies/{tea_name}")
+@observe(name="tea-classify")
 def getTeaClassifies(tea_name: str):
     result = client.chat.completions.create(
         model="llama-3.1-8b-instant",
@@ -133,6 +187,7 @@ def getTeaClassifies(tea_name: str):
     return result;
 
 @app.post("/teaextractor")
+@observe(name="tea-extractor")
 def getTeaDetailsFromText(teaText: TeaSentimentRequest):
     result = client.chat.completions.create(
         model='llama-3.1-8b-instant',
@@ -146,17 +201,25 @@ def getTeaDetailsFromText(teaText: TeaSentimentRequest):
     
     return result;
 
-@app.post('/getReviewSentiments')
-def getTeaSentiment(sentiment:TeaSentimentRequest):
+@app.post("/getReviewSentiments")
+@observe(name="review-sentiment")
+def get_tea_sentiment(req: TeaSentimentRequest):
     result = client.chat.completions.create(
-        model='llama-3.1-8b-instant',
-        messages = [
-        {"role": "system","content": "You are a sentiment anaylsis review. Return structured details about review. Be accurate and concise."},
-        {"role": "user", "content": f"review: {sentiment.review}"}
+        model="llama-3.1-8b-instant",
+        messages=[
+            {
+                "role": "system",
+                "content": """You are a sentiment analysis expert for tea reviews.
+Return:
+- sentiment: must be exactly 'positive', 'negative', or 'neutral'
+- rating: numeric rating out of 5 as a string e.g. '4 out of 5'
+- key_notes: comma separated descriptors e.g. 'smooth, earthy, calming'"""
+            },
+            {"role": "user", "content": f"Analyse this review: {req.review}"}
         ],
-        response_model=TeaSentimentAnalysis
+        response_model=TeaSentimentAnalysis,
     )
-    return result;
+    return result
 
 @app.get("/getAllTea")
 def getAllTea():
