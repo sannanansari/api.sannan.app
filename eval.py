@@ -1,6 +1,6 @@
 import requests
 
-API = "http://localhost:8000";
+API = "https://api.sannan.app"
 passed = 0;
 failed = 0;
 results = [];
